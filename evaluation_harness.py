@@ -18,6 +18,13 @@ import json
 
 logger = logging.getLogger(__name__)
 
+try:
+    from quantum_health_checker import QuantumHealthChecker, FallbackReason
+except ImportError:
+    logger.warning("quantum_health_checker not available")
+    QuantumHealthChecker = None
+    FallbackReason = None
+
 
 @dataclass
 class EvaluationMetrics:
@@ -28,6 +35,7 @@ class EvaluationMetrics:
     execution_time: float
     method: str
     additional_metrics: Dict[str, Any]
+    fallback_metrics: Optional[Dict[str, Any]] = None
 
 
 class EvaluationHarness:
@@ -42,6 +50,7 @@ class EvaluationHarness:
         """
         self.output_dir = output_dir
         self.results = []
+        self.health_checker = QuantumHealthChecker() if QuantumHealthChecker else None
     
     def run_quantum_pipeline(
         self,
@@ -86,6 +95,18 @@ class EvaluationHarness:
         
         execution_time = time.time() - start_time
         
+        # Collect fallback metrics
+        fallback_metrics = None
+        if self.health_checker:
+            fallback_stats = self.health_checker.get_fallback_statistics()
+            fallback_metrics = {
+                "total_fallbacks": fallback_stats.get("total_fallbacks", 0),
+                "fallback_rate": fallback_stats.get("fallback_rate", 0.0),
+                "reasons": fallback_stats.get("reasons", {}),
+                "operations": fallback_stats.get("operations", {}),
+                "most_common_reason": fallback_stats.get("most_common_reason")
+            }
+        
         metrics = EvaluationMetrics(
             traversal_efficiency=traversal_efficiency,
             clustering_purity=clustering_purity,
@@ -94,12 +115,17 @@ class EvaluationHarness:
             method="quantum",
             additional_metrics={
                 "entanglement": traversal_result.get("entanglement_measure", 0.0),
-                "quantum_advantage": 0.0  # Will be computed in comparison
-            }
+                "quantum_advantage": 0.0,  # Will be computed in comparison
+                "quantum_health": traversal_result.get("quantum_health", {})
+            },
+            fallback_metrics=fallback_metrics
         )
         
         self.results.append(metrics)
         logger.info(f"Quantum pipeline completed in {execution_time:.2f}s")
+        if fallback_metrics and fallback_metrics["total_fallbacks"] > 0:
+            logger.info(f"Fallbacks: {fallback_metrics['total_fallbacks']} "
+                       f"(rate={fallback_metrics['fallback_rate']:.2%})")
         return metrics
     
     def run_classical_pipeline(
@@ -154,7 +180,8 @@ class EvaluationHarness:
             rlhf_convergence=rlhf_convergence,
             execution_time=execution_time,
             method="classical",
-            additional_metrics={}
+            additional_metrics={},
+            fallback_metrics=None  # Classical doesn't have fallbacks
         )
         
         self.results.append(metrics)
@@ -294,6 +321,11 @@ class EvaluationHarness:
                 "rlhf_convergence": np.mean([r.rlhf_convergence for r in quantum_results]),
                 "execution_time": np.mean([r.execution_time for r in quantum_results])
             }
+            
+            # Add fallback summary
+            fallback_summary = self._generate_fallback_summary(quantum_results)
+            if fallback_summary:
+                summary["fallback_summary"] = fallback_summary
         
         if classical_results:
             summary["classical_avg"] = {
@@ -304,3 +336,90 @@ class EvaluationHarness:
             }
         
         return summary
+    
+    def _generate_fallback_summary(self, quantum_results: List[EvaluationMetrics]) -> Optional[Dict[str, Any]]:
+        """Generate summary of fallback events"""
+        fallback_data = [r.fallback_metrics for r in quantum_results if r.fallback_metrics]
+        
+        if not fallback_data:
+            return None
+        
+        total_fallbacks = sum(f["total_fallbacks"] for f in fallback_data)
+        total_operations = len(quantum_results)
+        
+        # Aggregate reasons
+        all_reasons = {}
+        for f in fallback_data:
+            for reason, count in f.get("reasons", {}).items():
+                all_reasons[reason] = all_reasons.get(reason, 0) + count
+        
+        # Aggregate operations
+        all_operations = {}
+        for f in fallback_data:
+            for op, count in f.get("operations", {}).items():
+                all_operations[op] = all_operations.get(op, 0) + count
+        
+        return {
+            "total_fallbacks": total_fallbacks,
+            "fallback_rate": total_fallbacks / max(1, total_operations),
+            "fallbacks_per_evaluation": total_fallbacks / len(fallback_data),
+            "reasons_breakdown": all_reasons,
+            "operations_breakdown": all_operations,
+            "most_common_reason": max(all_reasons.items(), key=lambda x: x[1])[0] if all_reasons else None
+        }
+    
+    def generate_fallback_report(self) -> Dict[str, Any]:
+        """
+        Generate detailed fallback report.
+        
+        Returns:
+            Comprehensive fallback analysis
+        """
+        if not self.health_checker:
+            return {"error": "Health checker not available"}
+        
+        fallback_stats = self.health_checker.get_fallback_statistics()
+        fallback_events = self.health_checker.get_fallback_events()
+        
+        # Analyze fallback patterns
+        report = {
+            "overview": fallback_stats,
+            "total_events": len(fallback_events),
+            "events_by_reason": {},
+            "events_by_operation": {},
+            "timeline": []
+        }
+        
+        # Group by reason
+        for event in fallback_events:
+            reason = event.reason.value
+            if reason not in report["events_by_reason"]:
+                report["events_by_reason"][reason] = []
+            report["events_by_reason"][reason].append({
+                "operation": event.operation,
+                "timestamp": event.timestamp,
+                "details": event.reason_details,
+                "qubits": event.attempted_qubits
+            })
+        
+        # Group by operation
+        for event in fallback_events:
+            op = event.operation
+            if op not in report["events_by_operation"]:
+                report["events_by_operation"][op] = []
+            report["events_by_operation"][op].append({
+                "reason": event.reason.value,
+                "timestamp": event.timestamp,
+                "details": event.reason_details
+            })
+        
+        # Timeline
+        for event in fallback_events[-20:]:  # Last 20 events
+            report["timeline"].append({
+                "timestamp": event.timestamp,
+                "operation": event.operation,
+                "reason": event.reason.value,
+                "details": event.reason_details
+            })
+        
+        return report

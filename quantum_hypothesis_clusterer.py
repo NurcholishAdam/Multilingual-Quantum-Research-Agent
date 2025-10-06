@@ -8,6 +8,9 @@ Uses QuantumSocialPolicyOptimization with QAOA layers for clustering.
 from typing import List, Dict, Any, Optional
 import numpy as np
 import logging
+from qiskit.providers.aer.noise import NoiseModel
+noise_model = NoiseModel.from_backend(backend)
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +28,8 @@ class QuantumHypothesisClusterer:
         num_clusters: int = 5,
         qaoa_layers: int = 3,
         backend: str = "qiskit_aer",
-        shots: int = 1024
+        shots: int = 1024,
+        max_noise_threshold: float = 0.15
     ):
         """
         Initialize quantum hypothesis clusterer.
@@ -35,11 +39,25 @@ class QuantumHypothesisClusterer:
             qaoa_layers: Number of QAOA layers (p parameter)
             backend: Quantum backend
             shots: Number of measurement shots
+            max_noise_threshold: Maximum acceptable noise level (higher for QAOA)
         """
         self.num_clusters = num_clusters
         self.qaoa_layers = qaoa_layers
         self.backend = backend
         self.shots = shots
+        self.max_noise_threshold = max_noise_threshold
+        
+        # Initialize health checker
+        try:
+            from quantum_health_checker import QuantumHealthChecker
+            self.health_checker = QuantumHealthChecker(
+                max_noise_threshold=max_noise_threshold,
+                min_qubits_required=num_clusters
+            )
+        except ImportError:
+            logger.warning("quantum_health_checker not available")
+            self.health_checker = None
+        
         self.quantum_available = self._check_quantum_availability()
         
         if self.quantum_available:
@@ -85,18 +103,69 @@ class QuantumHypothesisClusterer:
         Returns:
             Dictionary with cluster assignments and quality metrics
         """
+        import time
+        start_time = time.time()
+        
         n_hypotheses = embeddings.shape[0]
+        required_qubits = n_hypotheses  # One qubit per hypothesis
         
         if similarity_matrix is None:
             similarity_matrix = self._compute_similarity_matrix(embeddings)
+        
+        # Perform health check if available
+        if self.health_checker:
+            health = self.health_checker.quantum_health_check(
+                backend_name=self.backend,
+                required_qubits=required_qubits
+            )
+            
+            if not health.available:
+                from quantum_health_checker import FallbackReason
+                reason = FallbackReason.QUANTUM_UNAVAILABLE
+                if health.num_qubits < required_qubits:
+                    reason = FallbackReason.INSUFFICIENT_QUBITS
+                elif health.noise_level > self.max_noise_threshold:
+                    reason = FallbackReason.QUANTUM_NOISE_EXCEEDED
+                
+                self.health_checker.log_fallback(
+                    operation="hypothesis_clustering",
+                    reason=reason,
+                    reason_details=f"Health check failed: {', '.join(health.issues)}",
+                    attempted_qubits=required_qubits,
+                    execution_time=time.time() - start_time
+                )
+                
+                logger.warning(f"Quantum not ready (score={health.readiness_score:.2f}), using classical clustering")
+                return self._classical_cluster(embeddings, similarity_matrix)
         
         if not self.quantum_available:
             logger.warning("Quantum not available, using classical clustering")
             return self._classical_cluster(embeddings, similarity_matrix)
         
         try:
-            return self._qaoa_cluster(embeddings, similarity_matrix)
+            result = self._qaoa_cluster(embeddings, similarity_matrix)
+            
+            # Add health info if available
+            if self.health_checker and self.health_checker._last_health_check:
+                health = self.health_checker._last_health_check
+                result["quantum_health"] = {
+                    "readiness_score": health.readiness_score,
+                    "noise_level": health.noise_level,
+                    "num_qubits": health.num_qubits
+                }
+            
+            return result
         except Exception as e:
+            if self.health_checker:
+                from quantum_health_checker import FallbackReason
+                self.health_checker.log_fallback(
+                    operation="hypothesis_clustering",
+                    reason=FallbackReason.QUANTUM_ERROR,
+                    reason_details=f"Execution error: {str(e)}",
+                    attempted_qubits=required_qubits,
+                    execution_time=time.time() - start_time
+                )
+            
             logger.error(f"QAOA clustering failed: {e}, falling back to classical")
             return self._classical_cluster(embeddings, similarity_matrix)
     

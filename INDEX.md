@@ -8,6 +8,8 @@ Quick reference for all components of the multilingual quantum research agent.
 |------|-------------|
 | [MULTILINGUAL_QUANTUM_README.md](MULTILINGUAL_QUANTUM_README.md) | Complete documentation with features, API, examples |
 | [MULTILINGUAL_QUANTUM_COMPLETION_SUMMARY.md](MULTILINGUAL_QUANTUM_COMPLETION_SUMMARY.md) | Detailed completion report with benchmarks |
+| [QUANTUM_HEALTH_MONITORING_README.md](QUANTUM_HEALTH_MONITORING_README.md) | **NEW** Health monitoring and fallback tracking guide |
+| [QUBIT_NOISE_VALIDATION_SUMMARY.md](QUBIT_NOISE_VALIDATION_SUMMARY.md) | **NEW** Qubit & noise validation proof |
 | [QUICK_START_GUIDE.md](QUICK_START_GUIDE.md) | 5-minute quick start with examples |
 | [README.md](README.md) | Main quantum integration README (updated) |
 | [INDEX.md](INDEX.md) | This file - navigation index |
@@ -20,8 +22,9 @@ Quick reference for all components of the multilingual quantum research agent.
 | [language_modules.py](language_modules.py) | NLP pipelines for 5 languages |
 | [quantum_citation_walker.py](quantum_citation_walker.py) | Quantum walk-based citation traversal |
 | [quantum_hypothesis_clusterer.py](quantum_hypothesis_clusterer.py) | QAOA-based hypothesis clustering |
+| [quantum_health_checker.py](quantum_health_checker.py) | **NEW** Quantum health monitoring and fallback tracking |
 | [synthetic_data_generator.py](synthetic_data_generator.py) | Multilingual corpus generation |
-| [evaluation_harness.py](evaluation_harness.py) | Benchmarking and evaluation framework |
+| [evaluation_harness.py](evaluation_harness.py) | Benchmarking and evaluation framework (with fallback metrics) |
 
 ## 🚀 Setup & Demo
 
@@ -29,7 +32,9 @@ Quick reference for all components of the multilingual quantum research agent.
 |------|-------------|
 | [setup_multilingual_quantum.py](setup_multilingual_quantum.py) | Automated setup script |
 | [demo_complete_multilingual_quantum.py](demo_complete_multilingual_quantum.py) | Complete demo with 6 examples |
+| [demo_quantum_health_monitoring.py](demo_quantum_health_monitoring.py) | **NEW** Health monitoring and fallback demo |
 | [test_multilingual_quantum_integration.py](test_multilingual_quantum_integration.py) | Integration test suite |
+| [test_qubit_noise_validation.py](test_qubit_noise_validation.py) | **NEW** Qubit & noise validation tests |
 | [requirements.txt](requirements.txt) | Python dependencies |
 
 ## 📓 Jupyter Notebooks

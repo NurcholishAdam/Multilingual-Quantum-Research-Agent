@@ -9,6 +9,17 @@ with entangled relevance scores.
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+try:
+    from quantum_health_checker import QuantumHealthChecker, FallbackReason
+except ImportError:
+    logger.warning("quantum_health_checker not available, using basic fallback")
+    QuantumHealthChecker = None
+    FallbackReason = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +31,16 @@ class QuantumCitationWalker:
     Input: Citation adjacency matrix + semantic weights
     Output: Quantum-walk-based traversal paths with entangled relevance scores
     """
-    
+    backend = Aer.get_backend("qasm_simulator")
+    if required_qubits > backend.configuration().n_qubits:
+    agent.fallback_to_classical("graph")
+
     def __init__(
         self,
         num_qubits: Optional[int] = None,
         backend: str = "qiskit_aer",
-        shots: int = 1024
+        shots: int = 1024,
+        max_noise_threshold: float = 0.1
     ):
         """
         Initialize quantum citation walker.
@@ -34,10 +49,19 @@ class QuantumCitationWalker:
             num_qubits: Number of qubits (auto-determined from graph size)
             backend: Quantum backend to use
             shots: Number of measurement shots
+            max_noise_threshold: Maximum acceptable noise level
         """
         self.num_qubits = num_qubits
         self.backend = backend
         self.shots = shots
+        self.max_noise_threshold = max_noise_threshold
+        
+        # Initialize health checker
+        self.health_checker = QuantumHealthChecker(
+            max_noise_threshold=max_noise_threshold,
+            min_qubits_required=2
+        )
+        
         self.quantum_available = self._check_quantum_availability()
         
         if self.quantum_available:
@@ -86,13 +110,51 @@ class QuantumCitationWalker:
         Returns:
             Dictionary with paths, scores, and quantum measurements
         """
-        if not self.quantum_available:
-            logger.warning("Quantum not available, using classical fallback")
+        start_time = time.time()
+        n_nodes = adjacency_matrix.shape[0]
+        required_qubits = int(np.ceil(np.log2(n_nodes)))
+        
+        # Perform health check
+        health = self.health_checker.quantum_health_check(
+            backend_name=self.backend,
+            required_qubits=required_qubits
+        )
+        
+        # Check if quantum execution is feasible
+        if not health.available:
+            reason = FallbackReason.QUANTUM_UNAVAILABLE
+            if health.num_qubits < required_qubits:
+                reason = FallbackReason.INSUFFICIENT_QUBITS
+            elif health.noise_level > self.max_noise_threshold:
+                reason = FallbackReason.QUANTUM_NOISE_EXCEEDED
+            
+            self.health_checker.log_fallback(
+                operation="citation_traversal",
+                reason=reason,
+                reason_details=f"Health check failed: {', '.join(health.issues)}",
+                attempted_qubits=required_qubits,
+                execution_time=time.time() - start_time
+            )
+            
+            logger.warning(f"Quantum not ready (score={health.readiness_score:.2f}), using classical fallback")
             return self._classical_traverse(adjacency_matrix, semantic_weights, start_nodes, max_steps)
         
         try:
-            return self._quantum_traverse(adjacency_matrix, semantic_weights, start_nodes, max_steps)
+            result = self._quantum_traverse(adjacency_matrix, semantic_weights, start_nodes, max_steps)
+            result["quantum_health"] = {
+                "readiness_score": health.readiness_score,
+                "noise_level": health.noise_level,
+                "num_qubits": health.num_qubits
+            }
+            return result
         except Exception as e:
+            self.health_checker.log_fallback(
+                operation="citation_traversal",
+                reason=FallbackReason.QUANTUM_ERROR,
+                reason_details=f"Execution error: {str(e)}",
+                attempted_qubits=required_qubits,
+                execution_time=time.time() - start_time
+            )
             logger.error(f"Quantum traversal failed: {e}, falling back to classical")
             return self._classical_traverse(adjacency_matrix, semantic_weights, start_nodes, max_steps)
     
