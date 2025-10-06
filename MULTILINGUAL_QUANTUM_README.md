@@ -301,7 +301,7 @@ Contributions welcome! Areas for improvement:
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+This project is licensed under the CC BY-NC-SA 4.0 License.
 
 ## 📖 Citation
 
@@ -312,7 +312,7 @@ If you use this work in your research, please cite:
   title={Multilingual Quantum Research Agent},
   author={Your Name},
   year={2025},
-  url={https://github.com/yourusername/ai-research-agent}
+  url={https://github.com/NurcholishAdam/Multilingual-Quantum-Research-Agent}
 }
 ```
 
@@ -336,3 +336,4 @@ If you use this work in your research, please cite:
 - [ ] v1.3: Distributed quantum computing
 - [ ] v2.0: Full production deployment
 - [ ] v2.1: Cloud API service
+
